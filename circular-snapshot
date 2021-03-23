@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# create circular-buffer snapshots
+
+# first argument: backup destination root folder (snapshot folders will be 
+# created within)
+# following arguments: everything that gets copied over
+
+# 0-indexed; 3 = daily.0 through daily.3 is kept. 
+# must be nonzero, or the --link-dest option in rsync will break 
+ROT=3
+
+BACKUP_DIR="$1"
+
+shift
+
+# sliiiiiide to the left
+if [[ -e "$BACKUP_DIR/daily.$ROT" ]]; then
+  mv "$BACKUP_DIR/daily.$ROT" "$BACKUP_DIR/daily.0.new"
+fi
+
+for ((i=$ROT;i>0;i--)); do
+  if [[ -e "$BACKUP_DIR/daily.$((i - 1))" ]]; then
+    mv "$BACKUP_DIR/daily.$((i - 1))" "$BACKUP_DIR/daily.$i"
+  fi
+done
+
+# sliiiiiiide to the right
+if [[ -e "$BACKUP_DIR/daily.0.new" ]]; then
+  mv "$BACKUP_DIR/daily.0.new" "$BACKUP_DIR/daily.0"
+else
+  mkdir -p "$BACKUP_DIR/daily.0"
+fi
+
+
+# criss-cross! (well, rsync.)
+for backup in "$@"; do
+  rsync -aR --delete --delete-excluded --numeric-ids --link-dest="../../daily.1/$backup" "$backup" "$BACKUP_DIR/daily.0/$backup"
+done
