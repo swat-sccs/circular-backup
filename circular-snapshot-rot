@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# rotate files for circular-buffer snapshots
+
+PROG_NAME="${0##*/}"
+
+usage()
+{
+  echo "usage: $PROG_NAME [-r | --rotations num-rots] <from-level> <to-level> <backup-dir>"
+  exit 2
+}
+
+PARSED_ARGS=$(getopt -n "$PROG_NAME" -o r: -l rotations: -- "$@")
+
+VALID=$?
+if [[ "$VALID" != "0" ]]; then
+  usage
+fi
+
+eval set -- "$PARSED_ARGS"
+
+ROT=3
+
+while :
+do
+  case $1 in
+    -r | --rotations) ROT="$2" ; shift 2 ;;
+    --) shift; break ;;
+    *) echo "$PROG_NAME: unexpected option $1 - this should not happen" ; usage ;;
+  esac
+done
+
+if [[ "$#" -lt 3 ]]; then
+  usage
+fi
+
+FROM_LEVEL=$1
+TO_LEVEL=$2
+BACKUP_DIR=$3
+
+echo "$PROG_NAME: starting backup rotation"
+
+if [[ ! -d "$BACKUP_DIR/$FROM_LEVEL.0" ]]; then
+  echo "$PROG_NAME: error: $BACKUP_DIR/$FROM_LEVEL.0/ does not exist or is not a directory" 
+fi
+
+# sliiiiiide to the left
+if [[ -e "$BACKUP_DIR/$TO_LEVEL.$ROT" ]]; then
+  mv "$BACKUP_DIR/$TO_LEVEL.$ROT" "$BACKUP_DIR/$TO_LEVEL.0.new"
+fi
+
+
+for ((i=$ROT;i>0;i--)); do
+  if [[ -e "$BACKUP_DIR/$TO_LEVEL.$((i - 1))" ]]; then
+    mv "$BACKUP_DIR/$TO_LEVEL.$((i - 1))" "$BACKUP_DIR/$TO_LEVEL.$i"
+  fi
+done
+
+# sliiiiiiide to the right
+if [[ -e "$BACKUP_DIR/$TO_LEVEL.0.new" ]]; then
+  mv "$BACKUP_DIR/$TO_LEVEL.0.new" "$BACKUP_DIR/$TO_LEVEL.0"
+else
+  mkdir -p "$BACKUP_DIR/$TO_LEVEL.0"
+fi
+
+rsync -a --delete --numeric-ids --link-dest="../$FROM_LEVEL.0" "$BACKUP_DIR/$FROM_LEVEL.0/" "$BACKUP_DIR/$TO_LEVEL.0/"
+
+echo "$PROG_NAME: backup rotation complete"
