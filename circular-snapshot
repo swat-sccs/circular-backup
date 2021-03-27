@@ -1,39 +1,154 @@
 #!/bin/bash
 
 # create circular-buffer snapshots
+# reads files/folders to back up from /etc/circular-snapshot.txt by default
+# or specify with -s,--source
 
-# first argument: backup destination root folder (snapshot folders will be 
-# created within)
-# following arguments: everything that gets copied over
+# -f, --filter can point to an rsync filter file, see
+# https://man7.org/linux/man-pages/man1/rsync.1.html#FILTER_RULES
 
-# 0-indexed; 3 = daily.0 through daily.3 is kept. 
+# -r, --rotations can be used to specify the total number of backups to keep (default 3)
+PROG_NAME="${0##*/}"
+
+usage() 
+{
+  echo "usage: $PROG_NAME [-s | --sources file-list] [-f | --filter filter-file]
+                         [-r | --rotations num-rots] <level> <backup-dir> 
+                         [source1 source2 ...]"
+  exit 2
+}
+
+## parse initial command line args
+
+PARSED_ARGS=$(getopt -n "$PROG_NAME" -o s:f:r: -l sources:,filter:,rotations: -- "$@")
+
+VALID=$?
+if [[ "$VALID" != "0" ]]; then
+  usage
+fi
+
+eval set -- "$PARSED_ARGS"
+
+SOURCES_DEFAULT="/etc/circular-snapshot.txt"
+SOURCES="$SOURCES_DEFAULT"
+FILTER=unset
+# 0-indexed; 3 = $LEVEL.0 through $LEVEL.3 is kept. 
 # must be nonzero, or the --link-dest option in rsync will break 
 ROT=3
 
-BACKUP_DIR="$1"
+while :
+do
+  case $1 in
+    -s | --sources) SOURCES="$2" ; shift 2 ;;
+    -f | --filter) FILTER="$2" ; shift 2 ;;
+    -r | --rotations) ROT="$2" ; shift 2 ;;
+    --) shift; break ;;
+    *) echo "$PROG_NAME: unexpected option $1 - this should not happen" ; usage ;;
+  esac
+done
 
-shift
+# make sure we have enough command line arguments
 
-# sliiiiiide to the left
-if [[ -e "$BACKUP_DIR/daily.$ROT" ]]; then
-  mv "$BACKUP_DIR/daily.$ROT" "$BACKUP_DIR/daily.0.new"
+if [[ "$#" -lt 2 ]]; then
+  usage
 fi
 
+LEVEL="$1"
+shift
+BACKUP_DIR="$1"
+shift
+
+echo "$PROG_NAME: starting backup"
+
+# array of files/folders we want to back up
+declare -a backups
+
+# read in from source list if it exists
+if [[ -e "$SOURCES" ]]; then
+  # this is some magical bash bullshit that I don't understand
+  # but it reads each line and adds every non-blank line that doesn't start 
+  # with "#" to the backups array
+  sourcetext=$(cat "$SOURCES")
+  while IFS= read -r line ; do
+    if [[ -n "$line" && "$line" != \#* ]]; then 
+      backups+=("$line")
+    fi
+  done <<< "$sourcetext"
+elif [[ "$SOURCES" != "$SOURCES_DEFAULT" ]]; then
+  echo "$PROG_NAME: warning: sources file $SOURCES does not exist"
+fi
+
+# read in from CLI
+for item in "$@"; do
+  backups+=("$item")
+done
+
+# check that we have something to work with; exit if not
+if [[ ${#backups[@]} -eq 0 ]]; then
+  echo "$PROG_NAME: error: $SOURCES does not exist or is empty and no sources were specified on the command line"
+  exit 3
+fi
+
+# rotate the backups
+
+# sliiiiiide to the left
+if [[ -e "$BACKUP_DIR/$LEVEL.$ROT" ]]; then
+  mv "$BACKUP_DIR/$LEVEL.$ROT" "$BACKUP_DIR/$LEVEL.0.new"
+fi 
+
 for ((i=$ROT;i>0;i--)); do
-  if [[ -e "$BACKUP_DIR/daily.$((i - 1))" ]]; then
-    mv "$BACKUP_DIR/daily.$((i - 1))" "$BACKUP_DIR/daily.$i"
+  if [[ -e "$BACKUP_DIR/$LEVEL.$((i - 1))" ]]; then
+    mv "$BACKUP_DIR/$LEVEL.$((i - 1))" "$BACKUP_DIR/$LEVEL.$i"
   fi
 done
 
 # sliiiiiiide to the right
-if [[ -e "$BACKUP_DIR/daily.0.new" ]]; then
-  mv "$BACKUP_DIR/daily.0.new" "$BACKUP_DIR/daily.0"
+if [[ -e "$BACKUP_DIR/$LEVEL.0.new" ]]; then
+  mv "$BACKUP_DIR/$LEVEL.0.new" "$BACKUP_DIR/$LEVEL.0"
 else
-  mkdir -p "$BACKUP_DIR/daily.0"
+  mkdir -p "$BACKUP_DIR/$LEVEL.0"
 fi
 
+# this is EXTREMELY stupid but it's the only way to get rsync to delete files
+# that have been removed from the backup set. Basically, we build a list of
+# files and all of their subdirectories and use them to construct an rsync 
+# filter file (in addition to any filters that might be user-specified). Then
+# we rsync the entire tree with everything excluded except for the specific
+# files we want.
 
-# criss-cross! (well, rsync.)
-for backup in "$@"; do
-  rsync -aR --delete --delete-excluded --numeric-ids --link-dest="../../daily.1/$backup" "$backup" "$BACKUP_DIR/daily.0/$backup"
+filterfile=`mktemp /tmp/circular-backup-XXXXXXXXXX`
+
+if [[ -e "$FILTER" ]]; then 
+  cat "$FILTER" >> "$filterfile"
+fi
+
+for item in "${backups[@]}"; do
+  subdir="$item/"
+  absolute_subdir=
+  if [[ -d "$item" ]]; then
+    absolute_subdir=$(cd "$item"; pwd)
+  else
+    absolute_subdir=$(realpath "$item")
+    absolute_subdir="${absolute_subdir%/*}"
+    echo "+ $absolute_subdir/" >> "$filterfile"
+  fi
+  while true; do
+    subdir="$absolute_subdir/.."
+    absolute_subdir=$(cd "$subdir"; pwd)
+    if [[ "$absolute_subdir" == "/" ]]; then break; fi
+    echo "+ $absolute_subdir/" >> "$filterfile"
+  done
+  if [[ -d "$item" ]]; then
+    echo "+ $(cd "$item"; pwd)/***" >> "$filterfile"
+  else
+    echo "+ $(realpath "$item")" >> "$filterfile"
+  fi
 done
+
+echo "- *" >> "$filterfile"
+
+rsync -aR --delete --delete-excluded --numeric-ids --filter="merge $filterfile" --link-dest="../$LEVEL.1/" / "$BACKUP_DIR/$LEVEL.0/"
+
+rm "$filterfile"
+
+echo "$PROG_NAME: backup complete"
