@@ -58,10 +58,20 @@ shift
 BACKUP_DIR="$1"
 shift
 
+if [[ -e "$BACKUP_DIR/circular-backup.lock" ]]; then
+  echo "$PROG_NAME: error: another instance of this script is currently backing
+up to $BACKUP_DIR. Canceling backup to avoid conflicts. If you're sure there
+are no other instances of this script, you can run rm 
+$BACKUP_DIR/circular-backup.lock."
+  exit 1
+fi
+
+touch "$BACKUP_DIR/circular-backup.lock"
+
 echo "$PROG_NAME: starting backup"
 
 # array of files/folders we want to back up
-declare -a backups
+declare -a backups"
 
 # read in from source list if it exists
 if [[ -e "$SOURCES" ]]; then
@@ -87,7 +97,7 @@ done
 if [[ ${#backups[@]} -eq 0 ]]; then
   echo "$PROG_NAME: error: $SOURCES does not exist or is empty and no sources were specified on the command line"
   exit 3
-fi
+fi"
 
 # rotate the backups
 
@@ -151,4 +161,5 @@ rsync -aR --delete --delete-excluded --numeric-ids --filter="merge $filterfile" 
 
 rm "$filterfile"
 
+rm "$BACKUP_DIR/circular-backup.lock"
 echo "$PROG_NAME: backup complete"

@@ -38,6 +38,16 @@ FROM_LEVEL=$1
 TO_LEVEL=$2
 BACKUP_DIR=$3
 
+if [[ -e "$BACKUP_DIR/circular-backup.lock" ]]; then
+  echo "$PROG_NAME: error: another instance of this script is currently backing
+up to $BACKUP_DIR. Canceling backup to avoid conflicts. If you're sure there
+are no other instances of this script, you can run rm
+$BACKUP_DIR/circular-backup.lock."
+  exit 1
+fi
+
+touch "$BACKUP_DIR/circular-backup.lock"
+
 echo "$PROG_NAME: starting backup rotation"
 
 if [[ ! -d "$BACKUP_DIR/$FROM_LEVEL.0" ]]; then
@@ -64,5 +74,7 @@ else
 fi
 
 rsync -a --delete --numeric-ids --link-dest="../$FROM_LEVEL.0" "$BACKUP_DIR/$FROM_LEVEL.0/" "$BACKUP_DIR/$TO_LEVEL.0/"
+
+rm "$BACKUP_DIR/circular-backup.lock"
 
 echo "$PROG_NAME: backup rotation complete"
