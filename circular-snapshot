@@ -202,7 +202,7 @@ if [[ -e "$SCRIPTS" ]]; then
   
     mkdir -p "$destdir"
     rsync -a --delete --numeric-ids --link-dest="$(realpath "$BACKUP_DIR")/$LEVEL.1/script-backup/$(basename `realpath "$destdir"`)" "$tempdir/" "$destdir/"
-  rm -rf "$tempdir"
+    rm -rf "$tempdir"
   done
 fi 
 
