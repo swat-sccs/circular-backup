@@ -3,24 +3,33 @@
 # create circular-buffer snapshots
 # reads files/folders to back up from /etc/circular-snapshot.txt by default
 # or specify with -s,--source
+# (one file/folder per line; # is a comment)
 
 # -f, --filter can point to an rsync filter file, see
 # https://man7.org/linux/man-pages/man1/rsync.1.html#FILTER_RULES
 
 # -r, --rotations can be used to specify the total number of backups to keep (default 3)
+
+# -t, --scripts can be used to specify a file containing scripts to run
+# the script file should specify on each line the script to run
+# 
+# the script will be run in a temp directory and any files in the directory
+# after running will be synced to an output folder in <bkp-root>/script-backup 
+# equal to the name of the script minus any extensions
+
 PROG_NAME="${0##*/}"
 
 usage() 
 {
   echo "usage: $PROG_NAME [-s | --sources file-list] [-f | --filter filter-file]
-                         [-r | --rotations num-rots] <level> <backup-dir> 
-                         [source1 source2 ...]"
+                         [-t | --scripts script-list] [-r | --rotations num-rots]  
+                         <level> <backup-dir> [source1 source2 ...]"
   exit 2
 }
 
 ## parse initial command line args
 
-PARSED_ARGS=$(getopt -n "$PROG_NAME" -o s:f:r: -l sources:,filter:,rotations: -- "$@")
+PARSED_ARGS=$(getopt -n "$PROG_NAME" -o s:f:r:t: -l sources:,filter:,rotations:,scripts: -- "$@")
 
 VALID=$?
 if [[ "$VALID" != "0" ]]; then
@@ -32,6 +41,7 @@ eval set -- "$PARSED_ARGS"
 SOURCES_DEFAULT="/etc/circular-snapshot.txt"
 SOURCES="$SOURCES_DEFAULT"
 FILTER=unset
+SCRIPTS=unset
 # 0-indexed; 3 = $LEVEL.0 through $LEVEL.3 is kept. 
 # must be nonzero, or the --link-dest option in rsync will break 
 ROT=3
@@ -42,6 +52,7 @@ do
     -s | --sources) SOURCES="$2" ; shift 2 ;;
     -f | --filter) FILTER="$2" ; shift 2 ;;
     -r | --rotations) ROT="$2" ; shift 2 ;;
+    -t | --scripts) SCRIPTS="$2" ; shift 2 ;;
     --) shift; break ;;
     *) echo "$PROG_NAME: unexpected option $1 - this should not happen" ; usage ;;
   esac
@@ -58,7 +69,7 @@ shift
 BACKUP_DIR="$1"
 shift
 
-if [[ -e "$BACKUP_DIR/circular-backup.lock" ]]; then
+if [[ -e "$BACKUP_DIR/circular-backup.lock" ]] ; then
   echo "$PROG_NAME: error: another instance of this script is currently backing
 up to $BACKUP_DIR. Canceling backup to avoid conflicts. If you're sure there
 are no other instances of this script, you can run rm 
@@ -71,7 +82,7 @@ touch "$BACKUP_DIR/circular-backup.lock"
 echo "$PROG_NAME: starting backup"
 
 # array of files/folders we want to back up
-declare -a backups"
+declare -a backups
 
 # read in from source list if it exists
 if [[ -e "$SOURCES" ]]; then
@@ -97,14 +108,14 @@ done
 if [[ ${#backups[@]} -eq 0 ]]; then
   echo "$PROG_NAME: error: $SOURCES does not exist or is empty and no sources were specified on the command line"
   exit 3
-fi"
+fi
 
 # rotate the backups
 
 # sliiiiiide to the left
 if [[ -e "$BACKUP_DIR/$LEVEL.$ROT" ]]; then
   mv "$BACKUP_DIR/$LEVEL.$ROT" "$BACKUP_DIR/$LEVEL.0.new"
-fi 
+fi
 
 for ((i=$ROT;i>0;i--)); do
   if [[ -e "$BACKUP_DIR/$LEVEL.$((i - 1))" ]]; then
@@ -160,6 +171,40 @@ echo "- *" >> "$filterfile"
 rsync -aR --delete --delete-excluded --numeric-ids --filter="merge $filterfile" --link-dest="../$LEVEL.1/" / "$BACKUP_DIR/$LEVEL.0/"
 
 rm "$filterfile"
+
+echo "$PROG_NAME: file backup complete"
+
+# ok, now we do scripts
+
+# FIXME: right now I think the rsync step above deletes all the script outputs
+# and we end up resyncing them. this isn't really a big deal as long as they
+# don't change so they can get hardlinked but it's annoying and inefficient
+# if script output changes often
+if [[ -e "$SCRIPTS" ]]; then
+  echo "$PROG_NAME: backing up scripts"
+  declare -a scriptexecs
+
+  scripttext=$(cat "$SCRIPTS")
+  while IFS= read -r line ; do
+    if [[ -n "$line" && "$line" != \#* ]]; then 
+      scriptexecs+=("$line")
+    fi
+  done <<< "$scripttext"
+
+  for script in "${scriptexecs[@]}"; do
+    tempdir=`mktemp -d "/tmp/circular-backup-script-XXXXXXXXXX"`
+
+    (cd "$tempdir"; eval "$script")
+
+    scriptname=$(basename "$script")
+    destdir="$BACKUP_DIR/$LEVEL.0/script-backup/${scriptname##*/}"
+    destdir="${destdir%.*}"
+  
+    mkdir -p "$destdir"
+    rsync -a --delete --numeric-ids --link-dest="$(realpath "$BACKUP_DIR")/$LEVEL.1/script-backup/$(basename `realpath "$destdir"`)" "$tempdir/" "$destdir/"
+  rm -rf "$tempdir"
+  done
+fi 
 
 rm "$BACKUP_DIR/circular-backup.lock"
 echo "$PROG_NAME: backup complete"
