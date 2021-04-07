@@ -1,6 +1,8 @@
 #!/bin/bash
 
 # rotate files for circular-buffer snapshots
+# Written by Zachary Robinson '24 (robinsonz)
+# Last updated 2021-04-07
 
 PROG_NAME="${0##*/}"
 
