@@ -171,6 +171,8 @@ done
 
 echo "- *" >> "$filterfile"
 
+echo "Filter rules in use: $(cat "$filterfile")"
+
 rsync -aR --delete --delete-excluded --numeric-ids --filter="merge $filterfile" --link-dest="../$LEVEL.1/" / "$BACKUP_DIR/$LEVEL.0/"
 
 rm "$filterfile"
@@ -196,13 +198,15 @@ if [[ -e "$SCRIPTS" ]]; then
 
   for script in "${scriptexecs[@]}"; do
     tempdir=`mktemp -d "/tmp/circular-backup-script-XXXXXXXXXX"`
-
+    
+    echo "$PROG_NAME: running $script"
     (cd "$tempdir"; eval "$script")
 
     scriptname=$(basename "$script")
     destdir="$BACKUP_DIR/$LEVEL.0/script-backup/${scriptname##*/}"
     destdir="${destdir%.*}"
   
+    echo "$PROG_NAME: copying result of $script"
     mkdir -p "$destdir"
     rsync -a --delete --numeric-ids --link-dest="$(realpath "$BACKUP_DIR")/$LEVEL.1/script-backup/$(basename `realpath "$destdir"`)" "$tempdir/" "$destdir/"
     rm -rf "$tempdir"
