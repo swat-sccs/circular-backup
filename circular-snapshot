@@ -171,8 +171,6 @@ done
 
 echo "- *" >> "$filterfile"
 
-echo "Filter rules in use: $(cat "$filterfile")"
-
 rsync -aR --delete --delete-excluded --numeric-ids --filter="merge $filterfile" --link-dest="../$LEVEL.1/" / "$BACKUP_DIR/$LEVEL.0/"
 
 rm "$filterfile"
@@ -212,6 +210,8 @@ if [[ -e "$SCRIPTS" ]]; then
     rm -rf "$tempdir"
   done
 fi 
+
+touch "$BACKUP_DIR/$LEVEL.0"
 
 rm "$BACKUP_DIR/circular-backup.lock"
 echo "$PROG_NAME: backup complete"

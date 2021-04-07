@@ -77,6 +77,8 @@ fi
 
 rsync -a --delete --numeric-ids --link-dest="../$FROM_LEVEL.0" "$BACKUP_DIR/$FROM_LEVEL.0/" "$BACKUP_DIR/$TO_LEVEL.0/"
 
+touch "$BACKUP_DIR/$TO_LEVEL.0"
+
 rm "$BACKUP_DIR/circular-backup.lock"
 
 echo "$PROG_NAME: backup rotation complete"
