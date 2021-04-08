@@ -2,7 +2,10 @@
 
 # rotate files for circular-buffer snapshots
 # Written by Zachary Robinson '24 (robinsonz)
-# Last updated 2021-04-07
+# Last updated 2021-04-08
+
+# exit on any command error
+set -e
 
 PROG_NAME="${0##*/}"
 

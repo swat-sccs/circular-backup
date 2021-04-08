@@ -6,7 +6,7 @@
 # (one file/folder per line; # is a comment)
 
 # Written by Zachary Robinson '24 (robinsonz)
-# Last updated 2021-04-07
+# Last updated 2021-04-08
 
 # -f, --filter can point to an rsync filter file, see
 # https://man7.org/linux/man-pages/man1/rsync.1.html#FILTER_RULES
@@ -19,6 +19,9 @@
 # the script will be run in a temp directory and any files in the directory
 # after running will be synced to an output folder in <bkp-root>/script-backup 
 # equal to the name of the script minus any extensions
+
+# exit on any command error
+set -e
 
 PROG_NAME="${0##*/}"
 
