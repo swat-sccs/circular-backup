@@ -15,27 +15,30 @@
 
 # -t, --scripts can be used to specify a file containing scripts to run
 # the script file should specify on each line the script to run
-# 
+#
 # the script will be run in a temp directory and any files in the directory
-# after running will be synced to an output folder in <bkp-root>/script-backup 
+# after running will be synced to an output folder in <bkp-root>/script-backup
 # equal to the name of the script minus any extensions
+
+# -n, --remote makes rsync connect to the given remote over ssh
 
 # exit on any command error
 set -e
 
 PROG_NAME="${0##*/}"
 
-usage() 
+usage()
 {
   echo "usage: $PROG_NAME [-s | --sources file-list] [-f | --filter filter-file]
-                         [-t | --scripts script-list] [-r | --rotations num-rots]  
+                         [-t | --scripts script-list] [-r | --rotations num-rots]
+                         [-n | --remote remote-addr]
                          <level> <backup-dir> [source1 source2 ...]"
   exit 2
 }
 
 ## parse initial command line args
 
-PARSED_ARGS=$(getopt -n "$PROG_NAME" -o s:f:r:t: -l sources:,filter:,rotations:,scripts: -- "$@")
+PARSED_ARGS=$(getopt -n "$PROG_NAME" -o s:f:r:t:n: -l sources:,filter:,rotations:,scripts:,remote: -- "$@")
 
 VALID=$?
 if [[ "$VALID" != "0" ]]; then
@@ -48,9 +51,10 @@ SOURCES_DEFAULT="/etc/circular-snapshot.txt"
 SOURCES="$SOURCES_DEFAULT"
 FILTER=unset
 SCRIPTS=unset
-# 0-indexed; 3 = $LEVEL.0 through $LEVEL.3 is kept. 
-# must be nonzero, or the --link-dest option in rsync will break 
+# 0-indexed; 3 = $LEVEL.0 through $LEVEL.3 is kept.
+# must be nonzero, or the --link-dest option in rsync will break
 ROT=3
+REMOTE=unset
 
 while :
 do
@@ -59,6 +63,7 @@ do
     -f | --filter) FILTER="$2" ; shift 2 ;;
     -r | --rotations) ROT="$2" ; shift 2 ;;
     -t | --scripts) SCRIPTS="$2" ; shift 2 ;;
+    -n | --remote) REMOTE="$2:" ; shift 2 ;; # colon here for the host
     --) shift; break ;;
     *) echo "$PROG_NAME: unexpected option $1 - this should not happen" ; usage ;;
   esac
@@ -78,7 +83,7 @@ shift
 if [[ -e "$BACKUP_DIR/circular-backup.lock" ]] ; then
   echo "$PROG_NAME: error: another instance of this script is currently backing
 up to $BACKUP_DIR. Canceling backup to avoid conflicts. If you're sure there
-are no other instances of this script, you can run rm 
+are no other instances of this script, you can run rm
 $BACKUP_DIR/circular-backup.lock."
   exit 1
 fi
@@ -93,11 +98,11 @@ declare -a backups
 # read in from source list if it exists
 if [[ -e "$SOURCES" ]]; then
   # this is some magical bash bullshit that I don't understand
-  # but it reads each line and adds every non-blank line that doesn't start 
+  # but it reads each line and adds every non-blank line that doesn't start
   # with "#" to the backups array
   sourcetext=$(cat "$SOURCES")
   while IFS= read -r line ; do
-    if [[ -n "$line" && "$line" != \#* ]]; then 
+    if [[ -n "$line" && "$line" != \#* ]]; then
       backups+=("$line")
     fi
   done <<< "$sourcetext"
@@ -138,14 +143,14 @@ fi
 
 # this is EXTREMELY stupid but it's the only way to get rsync to delete files
 # that have been removed from the backup set. Basically, we build a list of
-# files and all of their subdirectories and use them to construct an rsync 
+# files and all of their subdirectories and use them to construct an rsync
 # filter file (in addition to any filters that might be user-specified). Then
 # we rsync the entire tree with everything excluded except for the specific
 # files we want.
 
 filterfile=`mktemp /tmp/circular-backup-XXXXXXXXXX`
 
-if [[ -e "$FILTER" ]]; then 
+if [[ -e "$FILTER" ]]; then
   cat "$FILTER" >> "$filterfile"
 fi
 
@@ -174,7 +179,7 @@ done
 
 echo "- *" >> "$filterfile"
 
-rsync -aR --delete --delete-excluded --numeric-ids --filter="merge $filterfile" --link-dest="../$LEVEL.1/" / "$BACKUP_DIR/$LEVEL.0/"
+rsync -aR --delete --delete-excluded --numeric-ids --filter="merge $filterfile" --link-dest="../$LEVEL.1/" / "$REMOTE$BACKUP_DIR/$LEVEL.0/"
 
 rm "$filterfile"
 
@@ -192,27 +197,27 @@ if [[ -e "$SCRIPTS" ]]; then
 
   scripttext=$(cat "$SCRIPTS")
   while IFS= read -r line ; do
-    if [[ -n "$line" && "$line" != \#* ]]; then 
+    if [[ -n "$line" && "$line" != \#* ]]; then
       scriptexecs+=("$line")
     fi
   done <<< "$scripttext"
 
   for script in "${scriptexecs[@]}"; do
     tempdir=`mktemp -d "/tmp/circular-backup-script-XXXXXXXXXX"`
-    
+
     echo "$PROG_NAME: running $script"
     (cd "$tempdir"; eval "$script")
 
     scriptname=$(basename "$script")
     destdir="$BACKUP_DIR/$LEVEL.0/script-backup/${scriptname##*/}"
     destdir="${destdir%.*}"
-  
+
     echo "$PROG_NAME: copying result of $script"
     mkdir -p "$destdir"
     rsync -a --delete --numeric-ids --link-dest="$(realpath "$BACKUP_DIR")/$LEVEL.1/script-backup/$(basename `realpath "$destdir"`)" "$tempdir/" "$destdir/"
     rm -rf "$tempdir"
   done
-fi 
+fi
 
 touch "$BACKUP_DIR/$LEVEL.0"
 
